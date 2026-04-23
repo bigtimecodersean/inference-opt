@@ -1,0 +1,23 @@
+[project]
+name = "inference-opt"
+version = "0.1.0"
+description = "LLM inference optimization: profiling, KV cache quant, Triton kernels"
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.4.0",
+    "transformers>=4.45.0",
+    "accelerate>=1.0.0",
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "seaborn",
+    "pyyaml",
+    "tqdm",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
