@@ -1,6 +1,12 @@
 .venv/
 __pycache__/
 *.pyc
-results/
 *.egg-info/
 .ipynb_checkpoints/
+
+# Ignore everything under results/ by default...
+results/*
+# ...except the baseline directory
+!results/baseline/
+# ...but ignore raw.json inside baseline (too big to track)
+results/baseline/raw.json
