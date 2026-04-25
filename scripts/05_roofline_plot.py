@@ -374,7 +374,7 @@ def main():
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlim(ai_min, ai_max)
-    ax.set_ylim(0.5, peak_tflops * 2)
+    ax.set_ylim(0.1, peak_tflops * 2)
     ax.set_xlabel("Arithmetic intensity (FLOPs / byte)", fontsize=11)
     ax.set_ylabel("Achieved throughput (TFLOPS)", fontsize=11)
     ax.set_title(
