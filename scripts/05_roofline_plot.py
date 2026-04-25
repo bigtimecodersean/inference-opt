@@ -334,18 +334,35 @@ def main():
     ax.text(ridge_point * 1.1, 1.5, f"ridge @ AI={ridge_point:.0f}",
             fontsize=9, color="gray")
 
-    # Plot each operator
+    # Plot each operator.
+    # Four of the linear categories land at (AI=1, TFLOPS≈1) because we
+    # apportioned linear-op time by FLOPs share (see load_op_times
+    # comments). They draw on top of each other; offset markers
+    # horizontally and place labels with leader lines so the plot is
+    # readable.
+
+    # Small horizontal jitter in log-space so overlapping points are
+    # distinguishable. AI is plotted on a log axis, so we jitter by
+    # a multiplicative factor (e.g., ×1.0, ×1.15, ×1.30, ...).
+    cat_names = list(cats.keys())
+    n = len(cat_names)
+    jitter_factors = np.linspace(0.75, 1.35, n)  # spread around AI=1
+
     colors = plt.cm.tab10(np.linspace(0, 1, 10))
     for i, (c, info) in enumerate(cats.items()):
         if info["tflops"] <= 0:
             continue
-        ax.scatter(info["ai"], info["tflops"],
+        # Only jitter when the point would otherwise overlap another.
+        # For our case, the four linear categories all sit at AI=1, so
+        # jitter them; attention lives at AI≈8, leave it alone.
+        is_overlap_cluster = abs(info["ai"] - 1.0) < 0.01
+        plot_x = info["ai"] * jitter_factors[i] if is_overlap_cluster else info["ai"]
+
+        ax.scatter(plot_x, info["tflops"],
                    s=150, color=colors[i], edgecolor="black", linewidth=1.2,
-                   zorder=5, label=f"{c} ({info['time_us']:.0f}μs)")
-        # Label
-        ax.annotate(c, (info["ai"], info["tflops"]),
-                    textcoords="offset points", xytext=(8, 5),
-                    fontsize=9)
+                   zorder=5, label=f"{c}  (AI={info['ai']:.1f}, {info['time_us']:.0f}μs)")
+
+    # No annotate() calls: the legend already shows the info per category.
 
     ax.set_xscale("log")
     ax.set_yscale("log")
