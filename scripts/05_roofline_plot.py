@@ -151,12 +151,12 @@ def attention():
     FlashAttention for one decode step:
       - Q has shape (batch, num_q_heads, 1, head_dim) — for new token
       - K, V have shape (batch, num_kv_heads, kv_cache_len, head_dim)
-    
+
     FLOPs (dominant term):
       QK^T:    2 * num_q_heads * 1 * kv_cache_len * head_dim
       SV:      2 * num_q_heads * 1 * kv_cache_len * head_dim
       Total:   4 * num_q_heads * kv_cache_len * head_dim per layer
-    
+
     Bytes (dominant term is KV cache read):
       K read:  num_kv_heads * kv_cache_len * head_dim * DTYPE_BYTES
       V read:  same
@@ -182,22 +182,10 @@ def attention():
 # the top 20 ops from our profile run.
 
 CATEGORY_PATTERNS = {
-    # All aten::mm calls — matmul dispatches. In Qwen-3B decode:
-    #   aten::mm dispatches 4 matmuls per layer (QKV, O, up, gate) + ffn_down,
-    #   so 5 per layer × 36 = 180 calls total. But we saw 145 calls of
-    #   aten::mm, suggesting some calls use addmm (bias-fused) variants
-    #   instead. We lump all the cutlass/gemv matmul kernels by category
-    #   via a separate bucketing below.
-    #
     # Rather than trying to parse which aten::mm call is which projection,
-    # we take a simpler approach: lump ALL matmul-ish time into a single
-    # "linear_layers" measurement, and use the analytical FLOPs/bytes to
-    # break it down by category for the plot.
-    #
-    # This is imprecise per-op but honest: the profiler can't cleanly
-    # separate which matmul kernel came from which layer, and the
-    # analytical math is deterministic.
-
+    # we lump ALL matmul-ish time into a single "linear_total" measurement,
+    # and use the analytical FLOPs/bytes to break it down by category for
+    # the plot.
     "linear_total": [
         "aten::mm", "aten::addmm",
     ],
@@ -325,44 +313,63 @@ def main():
     envelope = np.minimum(mem_line, compute_line)
 
     ax.plot(ai_line, envelope / 1e12, "k-", linewidth=2.5,
-            label=f"Roofline (this pod)")
+            label="Roofline (this pod)", zorder=3)
     ax.axhline(peak_tflops, linestyle=":", color="gray", alpha=0.5,
-               label=f"Peak compute: {peak_tflops:.0f} TFLOPS")
+               label=f"Peak compute: {peak_tflops:.0f} TFLOPS", zorder=2)
 
     # Ridge point marker
-    ax.axvline(ridge_point, linestyle=":", color="gray", alpha=0.5)
+    ax.axvline(ridge_point, linestyle=":", color="gray", alpha=0.5, zorder=2)
     ax.text(ridge_point * 1.1, 1.5, f"ridge @ AI={ridge_point:.0f}",
             fontsize=9, color="gray")
 
     # Plot each operator.
-    # Four of the linear categories land at (AI=1, TFLOPS≈1) because we
-    # apportioned linear-op time by FLOPs share (see load_op_times
-    # comments). They draw on top of each other; offset markers
-    # horizontally and place labels with leader lines so the plot is
-    # readable.
+    # Four of the linear categories land at (AI=1, TFLOPS≈1); jitter them
+    # horizontally in log-space so they're visually distinguishable.
+    # Attention lives at a different AI so it stays at its true position.
 
-    # Small horizontal jitter in log-space so overlapping points are
-    # distinguishable. AI is plotted on a log axis, so we jitter by
-    # a multiplicative factor (e.g., ×1.0, ×1.15, ×1.30, ...).
-    cat_names = list(cats.keys())
-    n = len(cat_names)
-    jitter_factors = np.linspace(0.75, 1.35, n)  # spread around AI=1
+    # Explicit, high-contrast colors (matplotlib's tab10 defaults sometimes
+    # include near-transparent values that hide points).
+    CATEGORY_COLORS = {
+        "qkv_proj":    "#1f77b4",  # blue
+        "o_proj":      "#ff7f0e",  # orange
+        "ffn_gate_up": "#2ca02c",  # green
+        "ffn_down":    "#d62728",  # red
+        "attention":   "#9467bd",  # purple
+    }
+    CATEGORY_MARKERS = {
+        "qkv_proj":    "o",
+        "o_proj":      "s",   # square
+        "ffn_gate_up": "^",   # triangle up
+        "ffn_down":    "v",   # triangle down
+        "attention":   "D",   # diamond
+    }
 
-    colors = plt.cm.tab10(np.linspace(0, 1, 10))
-    for i, (c, info) in enumerate(cats.items()):
+    # Jitter the four AI≈1 linear categories horizontally in log-space
+    jitter_factors = {
+        "qkv_proj":    0.70,
+        "o_proj":      0.88,
+        "ffn_gate_up": 1.12,
+        "ffn_down":    1.42,
+    }
+
+    for c, info in cats.items():
         if info["tflops"] <= 0:
             continue
-        # Only jitter when the point would otherwise overlap another.
-        # For our case, the four linear categories all sit at AI=1, so
-        # jitter them; attention lives at AI≈8, leave it alone.
-        is_overlap_cluster = abs(info["ai"] - 1.0) < 0.01
-        plot_x = info["ai"] * jitter_factors[i] if is_overlap_cluster else info["ai"]
 
-        ax.scatter(plot_x, info["tflops"],
-                   s=150, color=colors[i], edgecolor="black", linewidth=1.2,
-                   zorder=5, label=f"{c}  (AI={info['ai']:.1f}, {info['time_us']:.0f}μs)")
+        plot_x = info["ai"]
+        if c in jitter_factors:
+            plot_x = info["ai"] * jitter_factors[c]
 
-    # No annotate() calls: the legend already shows the info per category.
+        ax.scatter(
+            plot_x, info["tflops"],
+            s=220,
+            color=CATEGORY_COLORS[c],
+            marker=CATEGORY_MARKERS[c],
+            edgecolor="black",
+            linewidth=1.5,
+            zorder=10,  # above the envelope line
+            label=f"{c}  (AI={info['ai']:.1f}, {info['tflops']:.2f} TFLOPS, {info['time_us']:.0f}μs)",
+        )
 
     ax.set_xscale("log")
     ax.set_yscale("log")
