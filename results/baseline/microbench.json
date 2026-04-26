@@ -1,10 +1,9 @@
 {
   "gpu": "NVIDIA A100-SXM4-80GB",
-  "power_cap_w": 400,
-  "hbm_bandwidth_measured_tbs": 1.76,
+  "power_cap_w": 400.0,
+  "hbm_bandwidth_measured_tbs": 1.763,
   "hbm_bandwidth_peak_tbs": 2.04,
-  "compute_fp16_measured_tflops": 240.0,
+  "compute_fp16_measured_tflops": 253.76,
   "compute_fp16_peak_tflops": 312,
-  "ridge_point_measured_flops_per_byte": 136.3,
-  "notes": "Decode TPOT on this pod ~2x slower than on another 500W-capped A100-SXM4-80GB pod used earlier; attributed to host-side kernel launch overhead, not GPU-side limits. HBM bandwidth and compute ceilings are within expected range for A100 under 400W cap."
+  "ridge_point_measured_flops_per_byte": 143.93
 }
