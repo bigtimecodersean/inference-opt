@@ -71,6 +71,53 @@ Week 2–4 intervention is a strategy to move workload points either **up**
 (use available bandwidth more efficiently) or **right** (do more
 arithmetic per byte via batching, fusion, or quantization).
 
+
+## Week 2 — Batching analysis
+
+**Question:** how does decode performance scale with batch size, and where does the workload transition from memory-bound to compute-bound?
+
+**Hardware:** Same A100-SXM4-80GB (400W cap), this pod's measured ridge point: **144 FLOPs/byte**.
+
+### Sweep
+
+Batch sizes 1–256, prompt=512, output=128. Same harness as Week 1.
+
+| Batch | TTFT (ms) | TPOT (ms) | Throughput (tok/s) | Peak mem (GB) | Analytical AI (FFN) |
+|---|---|---|---|---|---|
+| 1   | 28.5  | 26.9 | 36   | 6.4  | 1.0 |
+| 8   | 146   | 27.3 | 279  | 7.6  | 8.0 |
+| 16  | 282   | 28.0 | 527  | 9.0  | 15.9 |
+| 64  | 1104  | 27.3 | 1776 | 17.5 | 61.7 |
+| 128 | 2208  | **26.4** | 2920 | 28.8 | 119.2 |
+| 256 | 4425  | **37.7** | 3560 | 51.4 | **222.9** |
+
+Raw data: [`results/batching/summary.csv`](results/batching/summary.csv).
+
+### Key findings
+
+**TPOT is invariant under batching from 1 → 128.** Per-token decode latency stays in a tight 26.4–28.0 ms band as batch grows from 1 to 128. Each weight matrix is loaded from HBM once per step regardless of batch size, so adding concurrent users doesn't slow them down. Weight amortization made concrete.
+
+**The ridge crossing is empirically visible at batch=256.** TPOT jumps from 26.4 ms (batch=128) to 37.7 ms (batch=256) — a 43% latency increase. The analytical FFN-up arithmetic intensity at batch=256 is **223 FLOPs/byte**, which crosses this pod's measured ridge point of 144. Below the ridge: extra batch is free in latency. Above the ridge: extra batch is paid in compute.
+
+**Throughput grows ~100×, but with diminishing per-user returns.** Aggregate throughput climbs from 36 to 3560 tok/s — yet per-user effective throughput (which includes prefill amortized over the run) falls from 36 to 14 tok/s. The cost-efficiency knee sits between **batch=64 and batch=128**, where users still get ~23 tok/s while the system serves at near-peak throughput.
+
+**TTFT scales linearly with batch.** Prefill is compute-bound from the start (it's a real `(B×seq, hidden) @ (hidden, out)` matmul, not a gemv). Doubling the batch doubles the work and doubles TTFT. This is why production serving systems use *continuous batching* — the static-batching prefill tax we're paying here is what continuous batching exists to amortize away.
+
+### The trajectory roofline
+
+![Batching roofline](results/batching/roofline.png)
+
+The plot tracks the FFN up-projection across all batch sizes. As batch grows the point slides right (AI scales linearly with batch via weight amortization) and up (achieved TFLOPS rises in proportion as the ceiling rises). The trajectory hugs the memory-bound slope through batch=128, then approaches the compute ceiling at batch=256.
+
+### Caveats and methodology notes
+
+- **Roofline framework choice.** Roofline analysis can be applied at either the per-operator level (one point per op) or the aggregate forward-pass level (single point summarizing the whole workload). We chose per-op because it's more actionable: different operators sit at different points and call for different optimizations. Aggregate AI hides that distinction.
+- **Achieved-TFLOPS estimation.** PyTorch Profiler reports per-op time but `aten::mm` aggregates over all matmul shapes. We can't cleanly extract "FFN up-projection time" from the profile, so we apportion linear-op time by FLOP share — assumes equal kernel efficiency across linear ops. Trajectory shape is robust to this; absolute TFLOPS values are approximate.
+- **Static vs continuous batching.** We use static batching (everyone starts together, finishes together). Production systems use continuous batching which interleaves prefill and decode, hiding the prefill tax. Continuous batching would change the throughput numbers; the per-token decode story is the same.
+- **OOM boundary not measured.** Sweep stopped at batch=256 by configuration. We used 51 GB of the 80 GB available there — could have pushed further but the ridge crossing was already clear.
+
+
+
 ## Repository layout
 
 ```
