@@ -6,7 +6,9 @@ __pycache__/
 
 # Ignore everything under results/ by default...
 results/*
+
 # ...except the baseline directory
 !results/baseline/
+!results/batching/
 # ...but ignore raw.json inside baseline (too big to track)
 results/baseline/raw.json
